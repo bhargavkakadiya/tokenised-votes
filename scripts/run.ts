@@ -5,7 +5,7 @@ import { Signer, BigNumber } from "ethers";
 
 const MINT_VALUE = ethers.utils.parseUnits("10");
 const PROPOSALS = ["Brownie", "Truffle", "Waffle"];
-const TARGETBLOCKNUMBER = 4;
+const TARGETBLOCKNUMBER = 7;
 
 
 
@@ -36,7 +36,7 @@ async function delegateVotes(_acc : Signer, _accTo : string, _contract : MyVotin
     return true;
 }
 
-async function castVote(_acc : Signer, _proposalId : number, _amtToVote: BigNumber, _contract : TokenizedBallot) {
+async function castVote(_acc : Signer, _proposalId : number, _amtToVote: BigNumber | number, _contract : TokenizedBallot) {
     
     const voteTx = await _contract.connect(_acc).vote(_proposalId, _amtToVote);
     const voteTxReceipt = await voteTx.wait();
@@ -44,14 +44,32 @@ async function castVote(_acc : Signer, _proposalId : number, _amtToVote: BigNumb
     return true;
 }
 
-async function main() {
+async function getVoteCountSummary(_contract : TokenizedBallot) {
+    console.log("==================Vote Count Summary===================");
+    for (let i = 0; i < PROPOSALS.length; i++) {
+        let proposal = await _contract.proposals(i);
+        console.log(`Proposal N.${i + 1}: ${ethers.utils.parseBytes32String(proposal.name)} has ${ethers.utils.formatUnits(proposal.voteCount)} votes`);
+    }
+}
 
+async function getVotingPowerSummary(_contract : MyVotingToken) {
+    console.log("==================Voting Power Summary===================");
+    const [deployer,acc1,acc2] = await ethers.getSigners();
+    const accounts = [acc1,acc2];
+    for (let i = 0; i < accounts.length; i++) {
+        console.log("Voting Power of", await accounts[i].getAddress(), ":", ethers.utils.formatUnits(await _contract.getVotes(await accounts[i].getAddress())));
+    }
+}
+
+
+async function main() {
+    
     // Deploying ERC20 contract
     const [deployer, acc1, acc2] = await ethers.getSigners();
     const contractFactoryMyVotingToken = new MyVotingToken__factory(deployer);
     const contractERC20 = await contractFactoryMyVotingToken.deploy();
     const deployTx = await contractERC20.deployed();
-    console.log("Contract deployed to:", contractERC20.address, "at block:", deployTx.deployTransaction.blockNumber);
+    console.log("MyVotingToken Contract deployed to:", contractERC20.address, "at block:", deployTx.deployTransaction.blockNumber);
 
     await mintERC20(acc1.address, contractERC20);
 
@@ -78,21 +96,37 @@ async function main() {
         ethers.utils.formatBytes32String
     ), contractERC20.address, TARGETBLOCKNUMBER);
     const deployTxTokenizedBallot = await contractTokenizedBallot.deployed();
-    console.log("Contract deployed to:", contractTokenizedBallot.address, "at block:", deployTxTokenizedBallot.deployTransaction.blockNumber);
+    console.log("TokenizedBallot Contract deployed to:", contractTokenizedBallot.address, "at block:", deployTxTokenizedBallot.deployTransaction.blockNumber);
 
-    // Query proposals from the deployed contract
-    const proposals = await contractTokenizedBallot.proposals(0);
-    console.log("Proposal N.1:", ethers.utils.parseBytes32String(proposals.name));
+    console.log("==================Acc2 gets tokens===================");
+    // Acc2
+    await mintERC20(acc2.address, contractERC20);
 
+    await getERC20Balance(acc2.address, contractERC20);
 
+    // delegate votes to acc1 to get voting power
+    await delegateVotes(acc2, acc1.address, contractERC20);
+
+    await getVotingPowerOfAccount(acc2.address, contractERC20);
+
+    await getVotingPowerSummary(contractERC20);
+    
+    await delegateVotes(acc1, acc1.address, contractERC20);
+    await getVotingPowerSummary(contractERC20);
+    
     // Voting
     console.log("==================Voting===================");
-
+    
     const amtToVote = await getVotingPowerOfAccount(acc1.address, contractERC20);
     await castVote(acc1, 0, amtToVote, contractTokenizedBallot);
     
+    await getVotingPowerSummary(contractERC20);
+
+    // Chechking vote count for all proposals and printing summary
+    await getVoteCountSummary(contractTokenizedBallot);
 
 }
+
 
 main().catch((error) => {
     console.error(error);
